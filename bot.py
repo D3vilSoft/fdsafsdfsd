@@ -5,7 +5,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import io
 
-TOKEN = "8474467954:AAEnbgKEI12clkYDvv2ffG-45K8yHqag56w"
+TOKEN = os.getenv("TOKEN")
+
 COMPANY_NAME = "Авито"
 
 # Печатные отступы (меняй при необходимости)
@@ -83,3 +84,4 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.run_polling()
+
