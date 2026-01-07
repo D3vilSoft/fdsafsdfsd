@@ -1,38 +1,44 @@
 import os
+import io
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
-from PIL import Image, ImageDraw, ImageFont
-import io
 
-TOKEN = "8474467954:AAEnbgKEI12clkYDvv2ffG-45K8yHqag56w"
-
+TOKEN = os.getenv("TOKEN")
 COMPANY_NAME = "Авито"
 
+# Печатные поля (px)
 TOP_MARGIN = 80
 BOTTOM_MARGIN = 120
 SIDE_MARGIN = 60
+
+if not TOKEN:
+    raise RuntimeError("TOKEN is not set")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1]
     file = await photo.get_file()
     image_bytes = await file.download_as_bytearray()
 
-    img = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+    # Читаем изображение через OpenCV
+    img_array = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
 
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    contours, _ = cv2.findContours(
+        thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
 
     if not contours:
         await update.message.reply_text("❌ Штрихкод не найден")
         return
 
-    x, y, w, h = cv2.boundingRect(contours[0])
+    # Самый большой контур — считаем штрихкодом
+    x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
 
     barcode_crop = img[
         max(0, y - 20): y + h + 20,
@@ -41,12 +47,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     barcode_img = Image.fromarray(cv2.cvtColor(barcode_crop, cv2.COLOR_BGR2RGB))
 
+    # Белый холст
     canvas_width = barcode_img.width
     canvas_height = (
         TOP_MARGIN +
         barcode_img.height +
-        70 +
-        45 +
+        70 +   # номер
+        40 +   # компания
         BOTTOM_MARGIN
     )
 
@@ -61,20 +68,36 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         font_num = font_name = ImageFont.load_default()
 
-    text_number = "503 837 3905"  # если надо — потом автоматизируем
+    # ВРЕМЕННО номер фиксированный (можно автоматизировать позже)
+    number_text = "503 837 3905"
+
     y_text = TOP_MARGIN + barcode_img.height + 15
 
-    draw.text((canvas_width // 2 - 100, y_text), text_number, fill="black", font=font_num)
-    draw.text((canvas_width // 2 - 40, y_text + 40), COMPANY_NAME, fill="black", font=font_name)
+    num_w = draw.textlength(number_text, font=font_num)
+    name_w = draw.textlength(COMPANY_NAME, font=font_name)
+
+    draw.text(
+        ((canvas_width - num_w) // 2, y_text),
+        number_text,
+        fill="black",
+        font=font_num
+    )
+
+    draw.text(
+        ((canvas_width - name_w) // 2, y_text + 40),
+        COMPANY_NAME,
+        fill="black",
+        font=font_name
+    )
 
     bio = io.BytesIO()
-    bio.name = "barcode_ready.png"
+    bio.name = "barcode_print_ready.png"
     final_img.save(bio, "PNG")
     bio.seek(0)
 
     await update.message.reply_photo(photo=bio)
 
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-app.run_polling()
-
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.run_polling()
