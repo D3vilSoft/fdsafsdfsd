@@ -1,103 +1,28 @@
 import os
-import io
-import cv2
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
 
-TOKEN = os.getenv("TOKEN")
-COMPANY_NAME = "Авито"
+TOKEN = os.getenv("BOT_TOKEN")
 
-# Печатные поля (px)
-TOP_MARGIN = 80
-BOTTOM_MARGIN = 120
-SIDE_MARGIN = 60
-
-if not TOKEN:
-    raise RuntimeError("TOKEN is not set")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Бот запущен. Отправь фото.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo = update.message.photo[-1]
-    file = await photo.get_file()
-    image_bytes = await file.download_as_bytearray()
+    await update.message.reply_text("Фото получил 👍 (обработка дальше)")
 
-    # Читаем изображение через OpenCV
-    img_array = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+def main():
+    app = Application.builder().token(TOKEN).build()
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    contours, _ = cv2.findContours(
-        thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
-
-    if not contours:
-        await update.message.reply_text("❌ Штрихкод не найден")
-        return
-
-    # Самый большой контур — считаем штрихкодом
-    x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
-
-    barcode_crop = img[
-        max(0, y - 20): y + h + 20,
-        max(0, x - SIDE_MARGIN): x + w + SIDE_MARGIN
-    ]
-
-    barcode_img = Image.fromarray(cv2.cvtColor(barcode_crop, cv2.COLOR_BGR2RGB))
-
-    # Белый холст
-    canvas_width = barcode_img.width
-    canvas_height = (
-        TOP_MARGIN +
-        barcode_img.height +
-        70 +   # номер
-        40 +   # компания
-        BOTTOM_MARGIN
-    )
-
-    final_img = Image.new("RGB", (canvas_width, canvas_height), "white")
-    final_img.paste(barcode_img, (0, TOP_MARGIN))
-
-    draw = ImageDraw.Draw(final_img)
-
-    try:
-        font_num = ImageFont.truetype("arial.ttf", 36)
-        font_name = ImageFont.truetype("arial.ttf", 30)
-    except:
-        font_num = font_name = ImageFont.load_default()
-
-    # ВРЕМЕННО номер фиксированный (можно автоматизировать позже)
-    number_text = "503 837 3905"
-
-    y_text = TOP_MARGIN + barcode_img.height + 15
-
-    num_w = draw.textlength(number_text, font=font_num)
-    name_w = draw.textlength(COMPANY_NAME, font=font_name)
-
-    draw.text(
-        ((canvas_width - num_w) // 2, y_text),
-        number_text,
-        fill="black",
-        font=font_num
-    )
-
-    draw.text(
-        ((canvas_width - name_w) // 2, y_text + 40),
-        COMPANY_NAME,
-        fill="black",
-        font=font_name
-    )
-
-    bio = io.BytesIO()
-    bio.name = "barcode_print_ready.png"
-    final_img.save(bio, "PNG")
-    bio.seek(0)
-
-    await update.message.reply_photo(photo=bio)
+    app.run_polling()
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.run_polling()
+    main()
